@@ -153,6 +153,8 @@ import type {
 import type { SelectedFile } from "@/attachments/selected-file";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { ComposerInputProvider, type ComposerInput } from "@/composer/session";
+import type { ComposerFocusOptions } from "@/composer/model";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 import { insertAtSelection } from "@/composer/insert-text";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useWorkspaceAttachmentsForScopes } from "@/attachments/workspace-attachments-store";
@@ -1432,6 +1434,36 @@ function ComposerContentImpl({
     [onChangeText, textSource],
   );
   const isInputLive = useIsInputLive(messageInputRef);
+  const isPanelActive = useRetainedPanelActive();
+  const { isActiveComposer } = useComposerKeyboardScope();
+  const inputRevealed = isPanelActive && isActiveComposer;
+  const isActiveComposerRef = useRef(isActiveComposer);
+  isActiveComposerRef.current = isActiveComposer;
+  const isInputRevealed = useCallback(
+    () => isInputLive() && isActiveComposerRef.current,
+    [isInputLive],
+  );
+  const takeInputFocus = useCallback((options?: ComposerFocusOptions) => {
+    const place = () => {
+      messageInputRef.current?.focus();
+      if (options?.selection) messageInputRef.current?.setSelection(options.selection);
+    };
+    if (isNative) {
+      place();
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      focusWithRetries({
+        focus: place,
+        isFocused: () => {
+          const element = messageInputRef.current?.getNativeElement?.() ?? null;
+          return element !== null && document.activeElement === element;
+        },
+        onSuccess: resolve,
+        onTimeout: () => reject(new Error("The composer input could not take focus.")),
+      });
+    });
+  }, []);
   const isComposerLockedRef = useRef(isComposerLocked);
   isComposerLockedRef.current = isComposerLocked;
   const composerInput = useMemo<ComposerInput>(
@@ -1439,6 +1471,9 @@ function ComposerContentImpl({
       locked: isComposerLocked,
       isLocked: () => isComposerLockedRef.current,
       isLive: isInputLive,
+      revealed: inputRevealed,
+      isRevealed: isInputRevealed,
+      focus: takeInputFocus,
       textSource,
       setText: replaceUserInput,
       insertText: insertUserInput,
@@ -1447,11 +1482,14 @@ function ComposerContentImpl({
     }),
     [
       attachments,
+      inputRevealed,
       insertUserInput,
       isComposerLocked,
       isInputLive,
+      isInputRevealed,
       replaceUserInput,
       setSelectedAttachments,
+      takeInputFocus,
       textSource,
     ],
   );
